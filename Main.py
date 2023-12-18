@@ -560,7 +560,6 @@ def import_csv(connection):
 
 # Main function
 def main():
-    # Replace 'Carnet_a.sqlite' with the actual name of your SQLite database file
     database = "Carnet_a.sqlite"
 
     # Create a connection to the SQLite database
