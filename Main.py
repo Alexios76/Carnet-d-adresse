@@ -1,6 +1,7 @@
 import sqlite3
 import tkinter as tk
-from tkinter import simpledialog
+from tkinter import simpledialog, messagebox
+import csv
 
 
 # Function to create a connection to the SQLite database
@@ -18,6 +19,15 @@ def add_contact(connection, nom, prenom, jour, mois, annee, address_email, numer
                 code_postal):
     try:
         cursor = connection.cursor()
+
+        # Check if the contact already exists
+        cursor.execute("SELECT COUNT(*) FROM Contact WHERE Nom=? AND Prenom=?", (nom, prenom))
+        count = cursor.fetchone()[0]
+
+        if count > 0:
+            # Contact already exists, show a pop-up message
+            tk.messagebox.showinfo("Contact Exists", "Contact already exists.")
+            return
 
         # Insert date of birth into DateOfBirth table
         cursor.execute("INSERT INTO DateDeNaissance (Jour, Mois, Annee) VALUES (?, ?, ?)", (jour, mois, annee))
@@ -131,12 +141,54 @@ def show_contact_info(connection, contact):
         root.destroy()
         modify_contact_info(connection, contact)
 
-    def delete_contact():
-        cursor = connection.cursor()
-        cursor.execute("DELETE FROM Contact WHERE Nom=? AND Prenom=?", (contact[0], contact[1]))
-        connection.commit()
-        cursor.close()
-        root.destroy()
+    def delete_contact(connection, nom, prenom):
+        try:
+            cursor = connection.cursor()
+
+            # Get the DateDeNaissance_ID and Address_ID associated with the contact
+            cursor.execute("""
+                SELECT DateDeNaissance_ID, Address_ID
+                FROM Contact
+                WHERE Nom=? AND Prenom=?
+            """, (nom, prenom))
+            result = cursor.fetchone()
+
+            if result:
+                date_of_birth_id, address_id = result
+
+                # Delete the contact from the 'Contact' table
+                cursor.execute("DELETE FROM Contact WHERE Nom=? AND Prenom=?", (nom, prenom))
+
+                # Delete the associated date of birth from the 'DateDeNaissance' table
+                cursor.execute("DELETE FROM DateDeNaissance WHERE DateDeNaissance_ID=?", (date_of_birth_id,))
+
+                # Delete the associated address from the 'Address' table
+                cursor.execute("DELETE FROM Address WHERE Address_ID=?", (address_id,))
+
+                connection.commit()
+                print("Contact deleted successfully!")
+            else:
+                print("Contact not found.")
+
+        except sqlite3.Error as e:
+            connection.rollback()
+            print("Error deleting contact:", e)
+
+        finally:
+            cursor.close()
+            root.destroy()
+
+    def sort_contacts_ascending():
+        contacts_listbox.delete(0, tk.END)
+        sorted_contacts = sorted(contacts, key=lambda x: (x[0], x[1]))
+        for sorted_contact in sorted_contacts:
+            contacts_listbox.insert(tk.END, f"{sorted_contact[0]} {sorted_contact[1]} - {sorted_contact[2]}")
+
+    def sort_contacts_descending():
+        contacts_listbox.delete(0, tk.END)
+        sorted_contacts = sorted(contacts, key=lambda x: (x[0], x[1]), reverse=True)
+        for sorted_contact in sorted_contacts:
+            contacts_listbox.insert(tk.END, f"{sorted_contact[0]} {sorted_contact[1]} - {sorted_contact[2]}")
 
     # Create a new Tkinter window for detailed information
     root = tk.Tk()
@@ -146,13 +198,13 @@ def show_contact_info(connection, contact):
     # Fetch detailed information from the database based on the contact
     cursor = connection.cursor()
     cursor.execute("""
-        SELECT Nom, Prenom, DateDeNaissance.Jour, DateDeNaissance.Mois, DateDeNaissance.Annee,
-               AddressEmail, NumeroDeTelephone, Address.NumeroEtRue, Address.Ville, Address.CodePostal
-        FROM Contact
-        JOIN DateDeNaissance ON Contact.DateDeNaissance_ID = DateDeNaissance.DateDeNaissance_ID
-        JOIN Address ON Contact.Address_ID = Address.Address_ID
-        WHERE Nom=? AND Prenom=?
-    """, (contact[0], contact[1]))
+           SELECT Nom, Prenom, DateDeNaissance.Jour, DateDeNaissance.Mois, DateDeNaissance.Annee,
+                  AddressEmail, NumeroDeTelephone, Address.NumeroEtRue, Address.Ville, Address.CodePostal
+           FROM Contact
+           JOIN DateDeNaissance ON Contact.DateDeNaissance_ID = DateDeNaissance.DateDeNaissance_ID
+           JOIN Address ON Contact.Address_ID = Address.Address_ID
+           WHERE Nom=? AND Prenom=?
+       """, (contact[0], contact[1]))
 
     contact_info = cursor.fetchone()
 
@@ -175,16 +227,29 @@ def show_contact_info(connection, contact):
         tk.Label(inner_frame, text=label).pack(anchor=tk.W)
         tk.Label(inner_frame, text=value).pack(anchor=tk.W)
 
-    # Buttons for Modify and Delete
+    # Buttons for Modify, Delete
+    button_frame = tk.Frame(inner_frame)
+    button_frame.pack(side=tk.TOP, pady=10)
+
+    # Buttons for Modify, Delete
     button_frame = tk.Frame(inner_frame)
     button_frame.pack(side=tk.TOP, pady=10)
 
     tk.Button(button_frame, text="Modify", command=open_modify_page).pack(side=tk.LEFT, padx=10)
-    tk.Button(button_frame, text="Delete", command=delete_contact).pack(side=tk.LEFT, padx=10)
+    tk.Button(button_frame, text="Delete", command=lambda: delete_contact(connection, contact[0], contact[1])).pack(
+        side=tk.LEFT, padx=10)
 
     # Configure the canvas to scroll the inner frame
     inner_frame.update_idletasks()
     canvas.config(scrollregion=canvas.bbox("all"))
+
+    # Add 'A to Z' and 'Z to A' buttons next to the search bar
+    search_var = tk.StringVar()
+    search_entry = tk.Entry(inner_frame, textvariable=search_var)
+    search_entry.pack(pady=10)
+
+    tk.Button(inner_frame, text="A to Z", command=sort_contacts_ascending).pack(side=tk.LEFT, padx=10)
+    tk.Button(inner_frame, text="Z to A", command=sort_contacts_descending).pack(side=tk.LEFT, padx=10)
 
     root.mainloop()
 
@@ -338,6 +403,57 @@ def display_contacts(connection):
     contacts_window.title("Contacts")
     contacts_window.geometry("400x400")
 
+    # Create 'A to Z' button
+    def sort_contacts_ascending():
+        update_contacts_list(connection, contacts_listbox, ascending=True)
+
+    tk.Button(contacts_window, text="A to Z", command=sort_contacts_ascending).pack(side=tk.TOP, padx=10)
+
+    # Create 'Z to A' button
+    def sort_contacts_descending():
+        update_contacts_list(connection, contacts_listbox, ascending=False)
+
+    tk.Button(contacts_window, text="Z to A", command=sort_contacts_descending).pack(side=tk.TOP, padx=10)
+
+    # Create 'Export CSV' button
+    def export_csv():
+        cursor = connection.cursor()
+        cursor.execute("SELECT Nom, Prenom, DateDeNaissance.Jour, DateDeNaissance.Mois, DateDeNaissance.Annee, "
+                       "AddressEmail, NumeroDeTelephone, Address.NumeroEtRue, Address.Ville, Address.CodePostal "
+                       "FROM Contact "
+                       "JOIN DateDeNaissance ON Contact.DateDeNaissance_ID = DateDeNaissance.DateDeNaissance_ID "
+                       "JOIN Address ON Contact.Address_ID = Address.Address_ID")
+        contacts_data = cursor.fetchall()
+        cursor.close()
+
+        # Export contacts to CSV
+        with open('contacts.csv', 'w', newline='') as csvfile:
+            fieldnames = ["Last Name", "First Name", "Day of Birth", "Month of Birth", "Year of Birth",
+                          "Email Address", "Phone Number", "Street Address", "City", "Postal Code"]
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+            """# Write header
+            writer.writeheader()"""
+
+            # Write data
+            for contact in contacts_data:
+                writer.writerow({
+                    "Last Name": contact[0],
+                    "First Name": contact[1],
+                    "Day of Birth": contact[2],
+                    "Month of Birth": contact[3],
+                    "Year of Birth": contact[4],
+                    "Email Address": contact[5],
+                    "Phone Number": contact[6],
+                    "Street Address": contact[7],
+                    "City": contact[8],
+                    "Postal Code": contact[9]
+                })
+
+        print("Contacts exported to contacts.csv")
+
+    tk.Button(contacts_window, text="Export CSV", command=export_csv).pack(side=tk.TOP, padx=10)
+
     # Create a search bar
     search_var = tk.StringVar()
     search_entry = tk.Entry(contacts_window, textvariable=search_var)
@@ -368,17 +484,26 @@ def display_contacts(connection):
     contacts_listbox.bind("<Return>", open_contact_info)
 
     # Function to update the list of contacts based on the search
-    def update_contacts_list(event):
+    def update_contacts_list(connection, contacts_listbox, ascending=None):
         search_term = search_var.get().lower()
         contacts_listbox.delete(0, tk.END)
 
         # Fetch contacts from the database based on the search term
         cursor = connection.cursor()
-        cursor.execute("""
-            SELECT Nom, Prenom, AddressEmail
-            FROM Contact
-            WHERE LOWER(Nom) LIKE ? OR LOWER(Prenom) LIKE ? OR LOWER(AddressEmail) LIKE ?
-        """, ('%' + search_term + '%', '%' + search_term + '%', '%' + search_term + '%'))
+        if ascending is not None:
+            order_by = "ASC" if ascending else "DESC"
+            cursor.execute(f"""
+                SELECT Nom, Prenom, AddressEmail
+                FROM Contact
+                WHERE LOWER(Nom) LIKE ? OR LOWER(Prenom) LIKE ? OR LOWER(AddressEmail) LIKE ?
+                ORDER BY Nom {order_by}, Prenom {order_by}
+            """, ('%' + search_term + '%', '%' + search_term + '%', '%' + search_term + '%'))
+        else:
+            cursor.execute("""
+                SELECT Nom, Prenom, AddressEmail
+                FROM Contact
+                WHERE LOWER(Nom) LIKE ? OR LOWER(Prenom) LIKE ? OR LOWER(AddressEmail) LIKE ?
+            """, ('%' + search_term + '%', '%' + search_term + '%', '%' + search_term + '%'))
 
         nonlocal contacts  # Use nonlocal instead of global
         contacts = cursor.fetchall()
@@ -389,7 +514,7 @@ def display_contacts(connection):
         cursor.close()
 
     # Bind the update function to the search entry
-    search_entry.bind("<KeyRelease>", update_contacts_list)
+    search_entry.bind("<KeyRelease>", lambda event: update_contacts_list(connection, contacts_listbox))
 
     # Function to handle scrolling with arrow keys
     def on_arrow_key(event):
@@ -413,6 +538,26 @@ def display_contacts(connection):
     contacts_window.mainloop()
 
 
+def import_csv(connection):
+    # Ask the user for the CSV file name
+    file_name = simpledialog.askstring("Import CSV", "Enter CSV file name:")
+
+    if file_name:
+        try:
+            with open(file_name, newline='', encoding='utf-8') as csvfile:
+                csv_reader = csv.reader(csvfile)
+                next(csv_reader)  # Skip header row
+
+                for row in csv_reader:
+                    nom, prenom, jour, mois, annee, address_email, numero_telephone, numero_et_rue, ville, code_postal = row
+                    add_contact(connection, nom, prenom, jour, mois, annee, address_email, numero_telephone,
+                                numero_et_rue, ville, code_postal)
+
+            messagebox.showinfo("Import Successful", "Contacts imported successfully!")
+
+        except Exception as e:
+            messagebox.showerror("Import Error", f"Error importing contacts from CSV: {e}")
+
 # Main function
 def main():
     # Replace 'Carnet_a.sqlite' with the actual name of your SQLite database file
@@ -432,7 +577,7 @@ def main():
         options_listbox.pack(expand=tk.YES, fill=tk.BOTH)
 
         # Add options to the listbox
-        options = ["Add New Contact", "Display Contacts", "Exit"]
+        options = ["Add New Contact", "Display Contacts", "Import CSV", "Exit"]
         for option in options:
             options_listbox.insert(tk.END, option)
 
@@ -454,6 +599,8 @@ def main():
                     add_contact_from_user_input(connection)
                 elif selected_option == "Display Contacts":
                     display_contacts(connection)
+                elif selected_option == "Import CSV":
+                    import_csv(connection)
                 elif selected_option == "Exit":
                     root.destroy()
 
