@@ -4,7 +4,7 @@ Gabriel Brousse
 Groupe (de projet) 12
 Seul membre du groupe
 
-Carnet d'adresses, sur interface graphique Tkinter, créé sur PyCharm écrit en Python et PHP (base de données).
+Carnet d'adresses, sur interface graphique Tkinter, créé sur PyCharm écrit en Python et SQL (base de données).
 Sqlite3 a été utilisé dans la création de la bdd.
 Le carnet d’address possède les fonctionnalités suivantes:
 
